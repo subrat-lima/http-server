@@ -44,7 +44,7 @@ def parse_request(data_packet):
     protocol = re.search(r"(?P<protocol>HTTP/\d\.\d)", data_packet).group("protocol")
     host = re.search(r"Host:\s(?P<host>\w+:\d+)", data_packet).group("host")
 
-    accept_encoding = []
+    accept_encoding = None
     if "Accept-Encoding" in data_packet:
         accept_encoding_set = set(
             re.search(
@@ -54,11 +54,14 @@ def parse_request(data_packet):
             .group("accept_encoding")
             .split(", ")
         )
+        accept_encoding = []
         for encoding in accept_encoding_set:
-            if encoding is SUPPORTED_ENCODING_FORMATS:
+            if encoding in SUPPORTED_ENCODING_FORMATS:
                 accept_encoding.append(encoding)
         if len(accept_encoding) > 0:
             accept_encoding = ", ".join(accept_encoding)
+        else:
+            accept_encoding = ""
 
     body = None
     request = {
@@ -83,8 +86,6 @@ def generate_response(request, response):
         headers += f"Content-Encoding: {response['headers']['accept_encoding']}\r\n"
     headers += "\r\n"
     response_packet = b"".join([headers.encode(), response["body"]])
-    print("response: ")
-    print(response_packet)
     return response_packet
 
 
@@ -103,30 +104,29 @@ def resolve_request(request, response):
     if os.path.exists(file_name):
         with open(file_name) as f:
             response["body"] = f.read()
-            if "gzip" in request["headers"]["accept_encoding"]:
-                response["body"] = gzip.compress(bytes(body, "utf-8"))
+            if (
+                request["headers"]["accept_encoding"]
+                and "gzip" in request["headers"]["accept_encoding"]
+            ):
+                response["body"] = gzip.compress(bytes(response["body"], "utf-8"))
                 response["headers"]["accept_encoding"] = request["headers"][
                     "accept_encoding"
                 ]
+            else:
+                response["body"] = response["body"].encode()
             response["headers"]["content_length"] = len(response["body"])
             response["headers"]["content_type"] = FILE_TYPES[file_type]
             response["headers"]["status_code"] = 200
-            response["body"] = response["body"].encode()
 
 
 def handle_connection(connection):
     data_packet = connection.recv(1024)
-    print(data_packet)
     request = parse_request(data_packet.decode())
 
     response = {}
     resolve_request(request, response)
-    print("resolved_request: ")
-    print(response)
 
     response_packet_data = generate_response(request, response)
-    print(f"response_packet_data:")
-    print(response_packet_data)
     connection.sendall(response_packet_data)
 
 
